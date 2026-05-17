@@ -23,15 +23,15 @@ Con muuucha (vaquita) fe
 
 Una vez que el backend recibe el JSON anterior, el texto plano no sirve para hacer algoritmos. El primer paso (que ambos desarrolladores tendrán que hacer o compartir al inicio) es convertir ese texto plano de `gramatica` en un objeto manejable en memoria (ej. una clase o diccionario en Python).
 
-Este sería el estado interno de la memoria una vez procesado:
+Este sería un ejemplo del estado interno de la memoria una vez procesado:
 
 ```python
 class Gramatica:
     def __init__(self):
-        # 1. Identificar No Terminales (Lado izquierdo de las flechas)
+        # 1. No Terminales (Lado izquierdo de las flechas)
         self.no_terminales = {'E', 'T', 'F'}
         
-        # 2. Identificar Terminales (Lo que no es No Terminal)
+        # 2. Terminales (Lo que no es No Terminal)
         # Se añade '$' automáticamente como fin de cadena
         self.terminales = {'+', '*', '(', ')', 'id', '$'} 
         

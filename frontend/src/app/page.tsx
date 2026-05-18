@@ -1,7 +1,7 @@
-import Image from "next/image";
+import { Playground } from "@/components/playground";
 
+// This is a pure Server Component — no "use client" here.
+// All interactivity lives inside <Playground />.
 export default function Home() {
-    return (
-        <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black"></div>
-    );
+    return <Playground />;
 }

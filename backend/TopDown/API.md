@@ -1,19 +1,42 @@
 # Top-Down — Contrato de API
 
-Parsers en esta carpeta para análisis **descendente**. Cada módulo expone `run_analysis(input_data)` con el mismo esquema de **entrada**; la **salida** comparte campos base y añade campos propios del método.
+Parsers **descendentes** para análisis sintáctico. Cada módulo expone `run_analysis(input_data)` con el mismo esquema de **entrada**; la **salida** comparte campos base y añade campos propios del método.
 
-## Punto de entrada
+---
 
-| Módulo | Función | Clase interna |
-|--------|---------|---------------|
-| `ll1_parser.py` | `run_analysis(input_data)` | `LL1Parser` |
-| `dr_parser.py` | `run_analysis(input_data)` | `RecursiveDescentParser` |
+## Parsers implementados
+
+| `tipo_parser` | Módulo | Función | Clase interna |
+|---------------|--------|---------|---------------|
+| `LL1` | `ll1_parser.py` | `run_analysis(input_data)` | `LL1Parser` |
+| `RD` / `DR` | `dr_parser.py` | `run_analysis(input_data)` | `RecursiveDescentParser` |
 
 ```python
+import sys
+sys.path.insert(0, "backend/TopDown")
+
 from ll1_parser import run_analysis as analyze_ll1
 from dr_parser import run_analysis as analyze_rd
+```
 
-result = analyze_ll1(input_data)
+### Enrutamiento sugerido (backend)
+
+```python
+PARSERS = {
+    "LL1": analyze_ll1,
+    "RD":  analyze_rd,
+    "DR":  analyze_rd,   # alias
+}
+
+def dispatch(request: dict) -> dict:
+    tipo = request.get("tipo_parser", "LL1").upper()
+  # normalizar alias
+    if tipo == "DR":
+        tipo = "RD"
+    fn = PARSERS.get(tipo)
+    if fn is None:
+        return {"error": f"tipo_parser '{tipo}' no soportado"}
+    return fn(request)
 ```
 
 ---
@@ -28,6 +51,12 @@ Objeto JSON/dict con **tres claves obligatorias** (todas `str`):
 | `simbolo_inicial` | `string` | No terminal inicial (debe existir en la gramática). |
 | `cadena_entrada` | `string` | Cadena **ya tokenizada**: tokens separados por **un espacio**. El parser añade `$` al final internamente. |
 
+### Campo opcional (router)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `tipo_parser` | `string` | `"LL1"` o `"RD"` / `"DR"` — lo usa el backend para elegir módulo. |
+
 ### Formato de la gramática
 
 - Separador de producción: `->`
@@ -39,8 +68,8 @@ Objeto JSON/dict con **tres claves obligatorias** (todas `str`):
 
 | Representación | Uso |
 |----------------|-----|
-| **`eps`** | Único símbolo en JSON y lógica interna. |
-| Alternativa vacía | `A -> b \|` o `A -> b \| ` (nada tras el último `\|`) → se normaliza a `eps`. |
+| **`eps`** | Valor canónico en JSON y lógica interna. |
+| Alternativa vacía | `A -> b \|` o nada tras el último `\|` → se normaliza a `eps`. |
 | `ε`, `epsilon`, `EPS`, … | Solo en **texto de entrada**: se normalizan a `eps` al parsear. |
 
 Ejemplo:
@@ -53,66 +82,78 @@ T' -> * F T' | eps
 F  -> ( E ) | id
 ```
 
-### Ejemplo de request (frontend → backend)
+### Ejemplo de request
 
 ```json
 {
   "gramatica": "E  -> T E'\nE' -> + T E' | eps\nT  -> F T'\nT' -> * F T' | eps\nF  -> ( E ) | id",
   "simbolo_inicial": "E",
-  "cadena_entrada": "id + id * id"
+  "cadena_entrada": "id + id * id",
+  "tipo_parser": "LL1"
 }
 ```
 
 ---
 
-## Salida común
+## Salida — campos comunes (ambos parsers)
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `gramatica_parseable` | `boolean` | Si la gramática es usable con **ese** método (ver criterio por parser). |
-| `cadena_valida` | `boolean` | Si la cadena pertenece al lenguaje (análisis de entrada completado con éxito). |
-| `mensaje` | `string` | Resumen legible del resultado o del error. |
-| `proceso_paso_a_paso` | `array` | Traza del análisis (vacía si se abortó por gramática no parseable / conflictos LL(1)). |
+| Campo | Tipo | Siempre | Descripción |
+|-------|------|---------|-------------|
+| `gramatica_parseable` | `boolean` | Sí | Si la gramática es usable con **ese** método (ver criterio por parser). |
+| `cadena_valida` | `boolean` | Sí | Si la cadena pertenece al lenguaje. |
+| `mensaje` | `string` | Sí | Resumen legible del resultado o del error. |
+| `proceso_paso_a_paso` | `array` | Sí | Traza del análisis; `[]` si se abortó por gramática no parseable (LL1) o no compatible (RD). |
 
-### Elemento de `proceso_paso_a_paso`
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `paso` | `number` | Índice del paso (1-based). |
-| `accion` | `string` | Descripción de la acción (formato depende del parser). |
-
-**LL(1)** — cada paso incluye además:
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `pila` | `string` | Pila con el tope a la **derecha** (incluye `$`). |
-| `entrada` | `string` | Buffer de entrada restante (incluye `$`). |
-
-Valores típicos de `accion` (LL1): `ACEPTAR`, `Coincidencia: 'id'`, `E -> T E'`, `ERROR: ...`.
-
-**Descenso recursivo** — solo `paso` y `accion` (backtracking, match, ACEPTAR, RECHAZAR, etc.).
+**Importante:** `gramatica_parseable === true` **no implica** `cadena_valida === true`.
 
 ---
 
 ## `gramatica_parseable` por método
 
 | Parser | `true` cuando | `false` cuando |
-|--------|---------------|--------------|
-| **LL(1)** | Tabla LL(1) sin conflictos (gramática LL(1)). | Conflictos en `M[NT, t]` y/o necesidad de transformación (p. ej. recursividad izquierda). |
-| **Descenso recursivo** | Símbolo inicial definido y **sin** recursividad izquierda directa. | NT inicial ausente o `A -> A α ...`. |
-
-Importante: `gramatica_parseable === true` **no implica** `cadena_valida === true` (la cadena puede ser inválida con gramática LL(1) correcta).
+|--------|---------------|----------------|
+| **LL(1)** | Tabla LL(1) sin conflictos. | Conflictos en `M[NT, t]` y/o recursividad izquierda no resuelta automáticamente. |
+| **Descenso recursivo** | Símbolo inicial definido y **sin** recursividad izquierda directa (`A -> A α …`). | NT inicial ausente o recursividad izquierda directa. |
 
 ---
 
-## Salida específica: LL(1) (`ll1_parser.py`)
+## `proceso_paso_a_paso`
+
+### LL(1)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `paso` | `number` | Índice 1-based. |
+| `pila` | `string` | Pila con tope a la **derecha** (incluye `$`). |
+| `entrada` | `string` | Buffer restante (incluye `$`). |
+| `accion` | `string` | Ver ejemplos. |
+
+Valores típicos de `accion`:
+
+- `ACEPTAR`
+- `Coincidencia: 'id'`
+- `E -> T E'` (producción aplicada)
+- `ERROR: ...`
+
+### Descenso recursivo (RD)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `paso` | `number` | Índice 1-based. |
+| `accion` | `string` | Descripción (backtracking, match terminal, ACEPTAR, RECHAZAR, expansión NT, etc.). |
+
+**No** incluye `pila` ni `entrada` en cada paso (solo traza narrativa).
+
+---
+
+## Salida específica: LL(1) — `ll1_parser.py`
 
 ### Campos adicionales
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
-| `conjuntos_first_follow` | `object` | Por cada NT: `{ "FIRST": string[], "FOLLOW": string[] }` (listas ordenadas). En JSON, épsilon aparece como **`"eps"`**. |
-| `construccion_tablas` | `object` | Tabla predictiva (ver abajo). |
+| `conjuntos_first_follow` | `object` | Por cada NT: `{ "FIRST": string[], "FOLLOW": string[] }` (ordenadas). Épsilon = `"eps"`. |
+| `construccion_tablas` | `object` | Tabla predictiva LL(1). |
 | `sugerencias_transformacion` | `object` | Si la gramática no es LL(1). |
 
 ### `construccion_tablas`
@@ -127,8 +168,11 @@ Importante: `gramatica_parseable === true` **no implica** `cadena_valida === tru
 }
 ```
 
-- Celdas vacías: clave de terminal **omitida** (no string vacío).
-- Conflictos: varias producciones en la misma celda unidas por ` o ` (ej. `E -> E + T o E -> T`).
+| Campo | Descripción |
+|-------|-------------|
+| `columnas` | Primera columna `NoTerminal`; resto = terminales (incl. `$`). |
+| `filas` | Una fila por NT. Celda ausente = sin entrada (no usar string vacío). |
+| Conflictos en celda | Varias producciones unidas por ` o ` (ej. `E -> E + T o E -> T`). |
 
 ### `sugerencias_transformacion`
 
@@ -136,48 +180,11 @@ Importante: `gramatica_parseable === true` **no implica** `cadena_valida === tru
 |-------|------|-------------|
 | `requiere_transformacion` | `boolean` | |
 | `motivo` | `string` | Causa (conflictos, recursividad izquierda, etc.). |
-| `gramatica_sugerida` | `string \| null` | Gramática transformada (texto multilínea) o `null`. |
+| `gramatica_sugerida` | `string \| null` | Gramática transformada (multilínea) o `null`. |
 
-Si `gramatica_parseable === false`, `proceso_paso_a_paso` suele ser `[]` y `cadena_valida === false`.
+Si `gramatica_parseable === false`: `proceso_paso_a_paso` suele ser `[]`, `cadena_valida === false`, pero **sí** se devuelven `conjuntos_first_follow`, `construccion_tablas` (con conflictos) y `sugerencias_transformacion`.
 
----
-
-## Salida específica: Descenso recursivo (`dr_parser.py`)
-
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `arbol_derivacion` | `object \| null` | Árbol de la derivación exitosa; `null` si rechazo o gramática no compatible. |
-
-### Nodo del árbol
-
-```json
-{
-  "name": "E",
-  "children": [
-    { "name": "T", "children": [...] },
-    { "name": "eps", "children": [] }
-  ]
-}
-```
-
-- Hojas terminales: `name` = lexema (`id`, `+`, …).
-- Producción vacía: nodo con `"name": "eps"` y `children: []`.
-
----
-
-## Integración frontend ↔ backend
-
-1. **Enviar siempre** los tres campos de entrada; no enviar `$` en `cadena_entrada` (se añade en servidor).
-2. **Elegir endpoint o query** según método (`LL1` vs `RD`) y llamar al `run_analysis` correspondiente.
-3. **UI recomendada:**
-   - Badge `gramatica_parseable` (gramática compatible con el método).
-   - Badge `cadena_valida` (resultado sobre la cadena).
-   - Tabla desde `construccion_tablas` (LL1) o árbol desde `arbol_derivacion` (RD).
-   - Lista/tabla desde `proceso_paso_a_paso`.
-4. **Épsilon en UI:** en JSON usar `eps`; en pantalla de demostración los tests muestran `ε` (solo presentación).
-5. **Errores:** usar `mensaje` para toast/alert; no asumir simulación si `proceso_paso_a_paso.length === 0`.
-
-### Ejemplo de respuesta LL(1) (éxito)
+### Respuesta LL(1) — gramática válida, cadena aceptada
 
 ```json
 {
@@ -188,9 +195,18 @@ Si `gramatica_parseable === false`, `proceso_paso_a_paso` suele ser `[]` y `cade
     "E": { "FIRST": ["(", "id"], "FOLLOW": ["$", ")"] },
     "E'": { "FIRST": ["+", "eps"], "FOLLOW": ["$", ")"] }
   },
-  "construccion_tablas": { "tipo": "LL1", "columnas": [...], "filas": [...] },
+  "construccion_tablas": {
+    "tipo": "LL1",
+    "columnas": ["NoTerminal", "(", ")", "*", "+", "id", "$"],
+    "filas": []
+  },
   "proceso_paso_a_paso": [
-    { "paso": 1, "pila": "E $", "entrada": "id + id $", "accion": "E -> T E'" }
+    {
+      "paso": 1,
+      "pila": "E $",
+      "entrada": "id + id * id $",
+      "accion": "E -> T E'"
+    }
   ],
   "sugerencias_transformacion": {
     "requiere_transformacion": false,
@@ -200,7 +216,148 @@ Si `gramatica_parseable === false`, `proceso_paso_a_paso` suele ser `[]` y `cade
 }
 ```
 
-### Tests locales
+### Respuesta LL(1) — gramática no LL(1)
+
+```json
+{
+  "gramatica_parseable": false,
+  "cadena_valida": false,
+  "mensaje": "La gramática no es LL(1). Se aplican transformaciones automáticas. La simulación de la cadena fue abortada.",
+  "conjuntos_first_follow": {},
+  "construccion_tablas": { "tipo": "LL1", "columnas": [], "filas": [] },
+  "proceso_paso_a_paso": [],
+  "sugerencias_transformacion": {
+    "requiere_transformacion": true,
+    "motivo": "La gramática NO es LL(1) debido a: ...",
+    "gramatica_sugerida": "E -> T E'\n..."
+  }
+}
+```
+
+---
+
+## Salida específica: Descenso recursivo — `dr_parser.py`
+
+### Campos adicionales
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `arbol_derivacion` | `object \| null` | Árbol de la derivación exitosa; `null` si rechazo o gramática no compatible. |
+
+**No** incluye `conjuntos_first_follow` ni `construccion_tablas`.
+
+### Nodo del árbol (`arbol_derivacion`)
+
+```json
+{
+  "name": "E",
+  "children": [
+    { "name": "T", "children": [] },
+    { "name": "eps", "children": [] }
+  ]
+}
+```
+
+| Campo | Descripción |
+|-------|-------------|
+| `name` | NT, terminal (`id`, `+`, …) o `"eps"`. |
+| `children` | Subárboles; `[]` en hojas y en nodo épsilon. |
+
+### Respuesta RD — éxito
+
+```json
+{
+  "gramatica_parseable": true,
+  "cadena_valida": true,
+  "mensaje": "Cadena analizada correctamente por Descenso Recursivo.",
+  "proceso_paso_a_paso": [
+    { "paso": 1, "accion": "Expandir E" },
+    { "paso": 2, "accion": "ACEPTAR: Cadena válida." }
+  ],
+  "arbol_derivacion": { "name": "E", "children": [] }
+}
+```
+
+### Respuesta RD — gramática incompatible
+
+```json
+{
+  "gramatica_parseable": false,
+  "cadena_valida": false,
+  "mensaje": "La gramatica tiene recursividad izquierda directa; no es compatible con descenso recursivo.",
+  "proceso_paso_a_paso": [],
+  "arbol_derivacion": null
+}
+```
+
+---
+
+## Comparativa Top-Down
+
+| Aspecto | LL(1) | Descenso recursivo |
+|---------|-------|---------------------|
+| Tabla predictiva | Sí (`construccion_tablas`) | No |
+| FIRST/FOLLOW | Sí | No |
+| Árbol de derivación | No | Sí (`arbol_derivacion`) |
+| `pila` / `entrada` en pasos | Sí | No |
+| Recursividad izquierda | Sugiere transformación | Rechaza gramática |
+| `gramatica_parseable` | Sí | Sí |
+
+---
+
+## Integración frontend ↔ backend
+
+### 1. Request
+
+Enviar `gramatica`, `simbolo_inicial`, `cadena_entrada` y `tipo_parser` (`LL1` o `RD`).
+
+### 2. Tokenización
+
+- Tokens separados por espacio.
+- **No** enviar `$` en `cadena_entrada`.
+
+### 3. UI recomendada
+
+| Badge / estado | Campo |
+|----------------|-------|
+| Gramática OK para el método | `gramatica_parseable` |
+| Cadena aceptada | `cadena_valida` |
+| Tabla LL(1) | `construccion_tablas` (filas = NT, columnas = terminales) |
+| FIRST/FOLLOW | `conjuntos_first_follow` |
+| Árbol (RD) | `arbol_derivacion` (componente árbol recursivo sobre `name`/`children`) |
+| Traza | `proceso_paso_a_paso` |
+| Sugerencia si no es LL(1) | `sugerencias_transformacion.gramatica_sugerida` |
+
+### 4. Tabla LL(1) en frontend
+
+- Encabezados: `construccion_tablas.columnas`
+- Filas: `construccion_tablas.filas[i][columna]`
+- Celda vacía: clave omitida en el objeto fila
+
+### 5. Árbol RD en frontend
+
+Render recursivo:
+
+```text
+function renderNode(n):
+  if n.children.length == 0: return n.name
+  return n.name + "(" + join(renderNode(c) for c in n.children) + ")"
+```
+
+### 6. Épsilon
+
+- JSON: `eps`
+- UI: opcional mostrar `ε`
+
+### 7. Errores y estados vacíos
+
+| Condición | Comportamiento UI |
+|-----------|-------------------|
+| `gramatica_parseable === false` | No esperar simulación útil; mostrar `mensaje` y sugerencias (LL1) |
+| `proceso_paso_a_paso.length === 0` | Sin traza paso a paso |
+| `cadena_valida === false` y gramática OK | Mostrar traza hasta el error |
+
+### 8. Tests locales
 
 ```bash
 cd backend/test
@@ -210,9 +367,48 @@ python test_rd.py
 
 ---
 
-## Constantes internas (referencia)
+## Contrato unificado con Bottom-Up (referencia)
+
+El proyecto comparte entrada con parsers LR:
+
+```json
+{
+  "gramatica": "...",
+  "simbolo_inicial": "E",
+  "cadena_entrada": "id + id",
+  "tipo_parser": "LL1"
+}
+```
+
+Valores de `tipo_parser` en el proyecto completo:
+
+| Valor | Carpeta | Módulo |
+|-------|---------|--------|
+| `LL1` | TopDown | `ll1_parser` |
+| `RD`, `DR` | TopDown | `dr_parser` |
+| `LR0` | BottomUp | `lr0_parser` |
+| `SLR1` | BottomUp | `slr1_parser` |
+| `LR1` | BottomUp | `lr1_parser` |
+| `LALR1` | BottomUp | `lalr1_parser` |
+
+Ver `backend/BottomUp/API.md` para salida LR (`afn_clausura`, tablas shift-reduce, etc.).
+
+---
+
+## Constantes
 
 | Constante | Valor |
 |-----------|--------|
-| Épsilon | `eps` |
+| Épsilon (JSON) | `eps` |
 | Fin de entrada | `$` |
+
+---
+
+## Estructura de archivos
+
+```
+backend/TopDown/
+├── ll1_parser.py
+├── dr_parser.py
+└── API.md    # este documento
+```

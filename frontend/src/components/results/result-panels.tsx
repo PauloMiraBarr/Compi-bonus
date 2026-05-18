@@ -1,4 +1,4 @@
-import type { BackendResult } from "@/lib/backend";
+import type { AnalysisRequest, BackendResult } from "@/lib/backend";
 import { Badge } from "@/components/ui/badge";
 import { SectionCard } from "@/components/ui/section-card";
 import { CodeBlock } from "@/components/ui/code-block";
@@ -11,9 +11,84 @@ import { AutomatonGraph } from "@/components/results/automaton-graph";
 type ResultPanelsProps = {
     error: string | null;
     result: BackendResult | null;
+    request: AnalysisRequest | null;
+    onExplainWithAi?: (prompt: string) => void;
 };
 
-export function ResultPanels({ error, result }: ResultPanelsProps) {
+function buildExplainPrompt(request: AnalysisRequest | null, result: BackendResult | null) {
+    const parserType = request?.tipo_parser ?? "desconocido";
+    const grammar = request?.gramatica.trim() || "(vacía)";
+
+    if (result && typeof result === "object" && !("error" in result) && result.sugerencias_transformacion?.gramatica_sugerida) {
+        return [
+            `Explica por qué esta gramática sugerida mejora el análisis para ${parserType}.`,
+            "Quiero una explicación clara, breve y orientada a compiladores.",
+            `Gramática original:\n${grammar}`,
+            `Gramática sugerida:\n${result.sugerencias_transformacion.gramatica_sugerida}`,
+        ].join("\n\n");
+    }
+
+    if (result && typeof result === "object" && !("error" in result) && result.construccion_tablas?.conflictos?.length) {
+        return [
+            `Explica los conflictos detectados por ${parserType} y cómo resolverlos.`,
+            `Gramática:\n${grammar}`,
+            `Conflictos principales:\n${result.construccion_tablas.conflictos
+                .slice(0, 5)
+                .map((conflict) => `${conflict.estado} / ${conflict.simbolo}: ${conflict.conflicto}`)
+                .join("\n")}`,
+        ].join("\n\n");
+    }
+
+    if (result && typeof result === "object" && !("error" in result) && result.gramatica_parseable !== undefined) {
+        return [
+            `Explica si la gramática es parseable para ${parserType} y por qué.`,
+            `Resultado detectado: ${result.gramatica_parseable ? "parseable" : "no parseable"}.`,
+            `Gramática:\n${grammar}`,
+        ].join("\n\n");
+    }
+
+    return [
+        `Explica el análisis realizado por ${parserType} en términos simples.`,
+        `Gramática:\n${grammar}`,
+    ].join("\n\n");
+}
+
+function buildErrorExplainPrompt(request: AnalysisRequest | null, error: string | null) {
+    const parserType = request?.tipo_parser ?? "desconocido";
+
+    return [
+        `Explica este error del backend para el parser ${parserType} y cómo lo solucionaría un estudiante de compiladores.`,
+        error ? `Error:\n${error}` : "Error: no disponible",
+        `Gramática:\n${request?.gramatica.trim() || "(vacía)"}`,
+    ].join("\n\n");
+}
+
+function buildTableExplainPrompt(request: AnalysisRequest | null, result: BackendResult | null) {
+    const parserType = request?.tipo_parser ?? "desconocido";
+    const grammar = request?.gramatica.trim() || "(vacía)";
+
+    if (result && typeof result === "object" && !("error" in result) && result.construccion_tablas) {
+        const conflicts = result.construccion_tablas.conflictos?.length
+            ? result.construccion_tablas.conflictos
+                  .slice(0, 6)
+                  .map((conflict) => `${conflict.estado} / ${conflict.simbolo}: ${conflict.conflicto}`)
+                  .join("\n")
+            : "Sin conflictos explícitos.";
+
+        return [
+            `Explica la tabla de análisis del parser ${parserType}, especialmente sus conflictos o decisiones clave.`,
+            `Gramática:\n${grammar}`,
+            `Conflictos o notas:\n${conflicts}`,
+        ].join("\n\n");
+    }
+
+    return [
+        `Explica la tabla de análisis del parser ${parserType}.`,
+        `Gramática:\n${grammar}`,
+    ].join("\n\n");
+}
+
+export function ResultPanels({ error, result, request, onExplainWithAi }: ResultPanelsProps) {
     const typedResult = result && !("error" in result) ? result : null;
 
     const summary = typedResult
@@ -33,8 +108,19 @@ export function ResultPanels({ error, result }: ResultPanelsProps) {
                 subtitle="La lectura primaria viene de cadena_valida y mensaje. Los paneles adicionales dependen del parser ejecutado."
             >
                 {error ? (
-                    <div className="rounded-2xl border border-[color:var(--danger)] bg-[rgba(153,27,27,0.08)] p-5 text-sm">
-                        <div className="mb-2 font-semibold text-[color:var(--danger)]">Error de integración</div>
+                    <div className="rounded-2xl border border-(--danger) bg-[rgba(153,27,27,0.08)] p-5 text-sm">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                            <div className="font-semibold text-(--danger)">Error de integración</div>
+                            {onExplainWithAi ? (
+                                <button
+                                    type="button"
+                                    onClick={() => onExplainWithAi(buildErrorExplainPrompt(request, error))}
+                                    className="focus-ring rounded-full border border-theme bg-theme px-3 py-2 text-xs font-semibold transition hover:-translate-y-0.5"
+                                >
+                                    Explicar con IA
+                                </button>
+                            ) : null}
+                        </div>
                         <div>{error}</div>
                     </div>
                 ) : null}
@@ -43,12 +129,10 @@ export function ResultPanels({ error, result }: ResultPanelsProps) {
                     <div className="space-y-5">
                         <div className="grid gap-4 md:grid-cols-3">
                             <div
-                                className={`rounded-2xl border p-4 ${summary.valid ? "border-[color:var(--success)] bg-[rgba(22,101,52,0.06)]" : "border-[color:var(--danger)] bg-[rgba(153,27,27,0.06)]"}`}
+                                className={`rounded-2xl border p-4 ${summary.valid ? "border-(--success) bg-[rgba(22,101,52,0.06)]" : "border-(--danger) bg-[rgba(153,27,27,0.06)]"}`}
                             >
                                 <div className="text-xs uppercase tracking-wide text-muted">Estado de cadena</div>
-                                <div
-                                    className={`mt-2 text-xl font-bold ${summary.valid ? "text-[color:var(--success)]" : "text-[color:var(--danger)]"}`}
-                                >
+                                <div className={`mt-2 text-xl font-bold ${summary.valid ? "text-(--success)" : "text-(--danger)"}`}>
                                     {summary.valid ? "✓ Válida" : "✗ Inválida"}
                                 </div>
                             </div>
@@ -60,9 +144,20 @@ export function ResultPanels({ error, result }: ResultPanelsProps) {
 
                         <div className="flex flex-wrap gap-2">
                             {summary.parserParseable !== null ? (
-                                <Badge tone={summary.parserParseable ? "success" : "warning"}>
-                                    Gramática parseable: {summary.parserParseable ? "sí" : "no"}
-                                </Badge>
+                                <>
+                                    <Badge tone={summary.parserParseable ? "success" : "warning"}>
+                                        Gramática parseable: {summary.parserParseable ? "sí" : "no"}
+                                    </Badge>
+                                    {onExplainWithAi ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onExplainWithAi(buildExplainPrompt(request, typedResult))}
+                                            className="focus-ring rounded-full border border-theme bg-theme px-3 py-2 text-xs font-semibold transition hover:-translate-y-0.5"
+                                        >
+                                            Explicar con IA
+                                        </button>
+                                    ) : null}
+                                </>
                             ) : null}
                             <Badge tone={summary.valid ? "success" : "danger"}>
                                 Cadena: {summary.valid ? "aceptada" : "rechazada"}
@@ -95,6 +190,17 @@ export function ResultPanels({ error, result }: ResultPanelsProps) {
                         <SectionCard
                             title="Sugerencias de transformación"
                             subtitle="Solo LL(1) devuelve esta sección."
+                            action={
+                                onExplainWithAi ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => onExplainWithAi(buildExplainPrompt(request, typedResult))}
+                                        className="focus-ring rounded-full border border-theme bg-theme px-3 py-2 text-xs font-semibold transition hover:-translate-y-0.5"
+                                    >
+                                        Explicar con IA
+                                    </button>
+                                ) : undefined
+                            }
                         >
                             <div className="space-y-4 text-sm">
                                 <Badge
@@ -161,6 +267,17 @@ export function ResultPanels({ error, result }: ResultPanelsProps) {
                             <SectionCard
                                 title="Tabla de análisis"
                                 subtitle="Tabla predictiva o ACTION/GOTO, según el parser seleccionado. Las celdas en rojo indican conflictos."
+                                action={
+                                    onExplainWithAi ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onExplainWithAi(buildTableExplainPrompt(request, typedResult))}
+                                            className="focus-ring rounded-full border border-theme bg-theme px-3 py-2 text-xs font-semibold transition hover:-translate-y-0.5"
+                                        >
+                                            Explicar con IA
+                                        </button>
+                                    ) : undefined
+                                }
                             >
                                 <TableView table={typedResult.construccion_tablas} />
                             </SectionCard>

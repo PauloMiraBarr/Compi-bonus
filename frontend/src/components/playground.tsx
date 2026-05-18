@@ -9,6 +9,7 @@ import { useTheme } from "@/hooks/use-theme";
 import { GuideModal } from "@/components/ui/guide-modal";
 import { ParserForm } from "@/components/form/parser-form";
 import { ResultPanels } from "@/components/results/result-panels";
+import { AiTutor } from "@/components/results/ai-tutor";
 
 // ─── Token insertion helper ──────────────────────────────────────────────────
 
@@ -62,10 +63,14 @@ export function Playground() {
     const { theme, toggleTheme } = useTheme();
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const [form, setForm] = useState<AnalysisRequest>(sampleGrammars.lr);
+    const [analysisRequest, setAnalysisRequest] = useState<AnalysisRequest | null>(null);
+    const [analysisVersion, setAnalysisVersion] = useState(0);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<BackendResult | null>(null);
     const [guideOpen, setGuideOpen] = useState(false);
+    const [aiTutorOpen, setAiTutorOpen] = useState(false);
+    const [aiTutorSeed, setAiTutorSeed] = useState<string | null>(null);
 
     async function handleSubmit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -74,10 +79,13 @@ export function Playground() {
         setResult(null);
 
         try {
+            setAnalysisRequest({ ...form });
             const data = await runAnalysis(form);
             setResult(data);
+            setAnalysisVersion((version) => version + 1);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Error desconocido");
+            setAnalysisRequest(null);
         } finally {
             setLoading(false);
         }
@@ -85,6 +93,7 @@ export function Playground() {
 
     function loadSample(key: keyof typeof sampleGrammars) {
         setForm(sampleGrammars[key]);
+        setAnalysisRequest(null);
         setResult(null);
         setError(null);
     }
@@ -108,21 +117,24 @@ export function Playground() {
 
     return (
         <main className="min-h-screen compiler-grid text-foreground">
+            <div className="fixed right-4 top-4 z-50">
+                <button
+                    type="button"
+                    onClick={toggleTheme}
+                    className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded-full border border-theme bg-theme shadow-sm transition hover:-translate-y-0.5"
+                    aria-label={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+                    title={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
+                >
+                    <ThemeIcon theme={theme as "light" | "dark"} />
+                </button>
+            </div>
+
             <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8 lg:py-8">
                 {/* ── Header card ── */}
                 <section className="glass-panel w-full overflow-hidden rounded-4xl">
                     <div className="accent-line h-1 w-full" />
                     <div className="p-6 lg:p-8">
                         <div className="space-y-4">
-                            {/* Badges */}
-                            <div className="flex flex-wrap items-center gap-2">
-                                {["Compiladores", "Frontend académico", "Paleta compilador"].map((label) => (
-                                    <span key={label} className="chip rounded-full px-3 py-1 text-xs font-semibold">
-                                        {label}
-                                    </span>
-                                ))}
-                            </div>
-
                             {/* Title + description */}
                             <div className="space-y-3">
                                 <h1 className="max-w-3xl text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -136,15 +148,6 @@ export function Playground() {
 
                             {/* Actions */}
                             <div className="flex flex-wrap gap-3 text-sm">
-                                <button
-                                    type="button"
-                                    onClick={toggleTheme}
-                                    className="focus-ring inline-flex h-11 w-11 items-center justify-center rounded-full border border-theme bg-theme shadow-sm transition hover:-translate-y-0.5"
-                                    aria-label={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
-                                    title={theme === "dark" ? "Cambiar a tema claro" : "Cambiar a tema oscuro"}
-                                >
-                                    <ThemeIcon theme={theme as "light" | "dark"} />
-                                </button>
                                 <button
                                     type="button"
                                     onClick={() => setGuideOpen(true)}
@@ -178,7 +181,15 @@ export function Playground() {
 
                 {/* ── Results ── */}
                 <section id="resultado">
-                    <ResultPanels error={error} result={result} />
+                    <ResultPanels
+                        error={error}
+                        result={result}
+                        request={analysisRequest}
+                        onExplainWithAi={(prompt) => {
+                            setAiTutorSeed(prompt);
+                            setAiTutorOpen(true);
+                        }}
+                    />
                 </section>
 
                 {/* ── Footer ── */}
@@ -192,6 +203,16 @@ export function Playground() {
                     </div>
                 </footer>
             </div>
+
+            <AiTutor
+                request={analysisRequest}
+                result={result}
+                analysisVersion={analysisVersion}
+                open={aiTutorOpen}
+                seedPrompt={aiTutorSeed}
+                onOpenChange={setAiTutorOpen}
+                onSeedConsumed={() => setAiTutorSeed(null)}
+            />
 
             <GuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
         </main>

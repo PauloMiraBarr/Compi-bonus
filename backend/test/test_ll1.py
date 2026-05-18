@@ -5,7 +5,7 @@ Suite de pruebas para LL1Parser.
 Ejecuta los 4 casos de prueba y muestra los resultados en tablas legibles.
 
 Uso:
-    python test_ll1.py
+    cd backend/test && python test_ll1.py
 """
 
 from __future__ import annotations
@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 import textwrap
 from typing import Any
+
+import _paths  # noqa: F401  # TopDown en sys.path
 
 from ll1_parser import run_analysis
 
@@ -39,20 +41,13 @@ def _visible_len(text: str) -> int:
 
 
 def _disp_sym(sym: str) -> str:
-    """Epsilon interno ('') se muestra como ε solo en consola."""
-    return "ε" if sym == "" else sym
+    """En consola: eps interno -> simbolo ε."""
+    return "ε" if sym == "eps" else sym
 
 
 def _disp(text: str) -> str:
     s = str(text).replace("∅", "{}").replace("→", "->").replace("…", "...")
-    if " -> " in s:
-        head, _, rhs = s.partition(" -> ")
-        if not rhs.strip():
-            return f"{head} -> ε"
-    if "|" in s:
-        left, _, alt = s.partition("|")
-        if not alt.strip():
-            s = left.rstrip() + " | ε"
+    s = re.sub(r"\beps\b", "ε", s)
     if ", " in s:
         return ", ".join(_disp_sym(part) for part in s.split(", "))
     return s
@@ -240,9 +235,9 @@ CASES: list[dict[str, Any]] = [
         "input": {
             "gramatica": (
                 "E  -> T E'\n"
-                "E' -> + T E' | \n"
+                "E' -> + T E' | ε\n"
                 "T  -> F T'\n"
-                "T' -> * F T' | \n"
+                "T' -> * F T' | ε\n"
                 "F  -> ( E ) | id"
             ),
             "simbolo_inicial": "E",
@@ -268,9 +263,9 @@ CASES: list[dict[str, Any]] = [
         "input": {
             "gramatica": (
                 "E  -> T E'\n"
-                "E' -> + T E' | \n"
+                "E' -> + T E' | ε\n"
                 "T  -> F T'\n"
-                "T' -> * F T' | \n"
+                "T' -> * F T' | ε\n"
                 "F  -> ( E ) | id"
             ),
             "simbolo_inicial": "E",

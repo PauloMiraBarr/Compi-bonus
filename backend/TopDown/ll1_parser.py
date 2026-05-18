@@ -25,13 +25,19 @@ from copy import deepcopy
 from typing import Any
 
 # ── Constantes globales ────────────────────────────────────────────────────────
-EPSILON = ""            # epsilon (solo alternativa vacia o token '' en entrada)
-END_OF_INPUT = "$"      # marcador de fin de entrada / fondo de pila
+EPSILON = "eps"
+END_OF_INPUT = "$"
+
+# Entrada de gramatica: token eps, simbolo ε, o alternativa vacia
+EPSILON_INPUT = {"eps", "ε", "epsilon", "EPSILON", "EPS"}
+
+
+def _normalize_symbol(sym: str) -> str:
+    return EPSILON if sym in EPSILON_INPUT else sym
 
 
 def _format_symbols(symbols: list[str]) -> str:
-    """Cadena de simbolos; epsilon se serializa como ''."""
-    return " ".join("" if s == EPSILON else s for s in symbols)
+    return " ".join(symbols)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -102,7 +108,7 @@ class LL1Parser:
         Reglas del parser de texto:
           - Una línea = una regla de producción: "NT -> alt1 | alt2"
           - Los símbolos se separan por espacios dentro de cada alternativa.
-          - Alternativa vacia (nada tras '|') o token '' → epsilon interno ''.
+          - Alternativa vacia, token eps o simbolo ε → epsilon interno 'eps'.
           - Las líneas vacías se ignoran.
         """
         seen_nt: set[str] = set()
@@ -130,7 +136,7 @@ class LL1Parser:
             # Dividir en alternativas por '|'
             for alt_raw in tail.split("|"):
                 symbols = alt_raw.strip().split()
-                normalized = list(symbols)
+                normalized = [_normalize_symbol(s) for s in symbols]
                 if not normalized:
                     normalized = [EPSILON]
                 self.productions[head].append(normalized)

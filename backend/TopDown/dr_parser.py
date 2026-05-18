@@ -26,12 +26,13 @@ from copy import deepcopy
 from typing import Any
 
 # ── Constantes ────────────────────────────────────────────────────────────────
-EPSILON = ""
+EPSILON = "eps"
 END_OF_INPUT = "$"
+EPSILON_INPUT = {"eps", "ε", "epsilon", "EPSILON", "EPS"}
 
 
-def _format_symbols(symbols: list[str]) -> str:
-    return " ".join("" if s == EPSILON else s for s in symbols)
+def _normalize_symbol(sym: str) -> str:
+    return EPSILON if sym in EPSILON_INPUT else sym
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -127,7 +128,7 @@ class RecursiveDescentParser:
                 seen.add(head)
             for alt_raw in tail.split("|"):
                 symbols = alt_raw.strip().split()
-                normalized = list(symbols)
+                normalized = [_normalize_symbol(s) for s in symbols]
                 self.productions[head].append(normalized if normalized else [EPSILON])
 
     # ──────────────────────────────────────────────────────────────────────────

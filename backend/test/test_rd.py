@@ -5,13 +5,15 @@ Suite de pruebas para RecursiveDescentParser.
 Muestra los resultados en tablas y arbol visual en consola.
 
 Uso:
-    python test_rd_parser.py
+    cd backend/test && python test_rd.py
 """
 
 from __future__ import annotations
 
 import re
 from typing import Any
+
+import _paths  # noqa: F401
 
 from dr_parser import run_analysis
 
@@ -37,19 +39,12 @@ def _visible_len(text: str) -> int:
 
 
 def _disp_sym(sym: str) -> str:
-    return "ε" if sym == "" else sym
+    return "ε" if sym == "eps" else sym
 
 
 def _disp(text: str) -> str:
     s = str(text).replace("∅", "{}").replace("→", "->").replace("…", "...")
-    if " -> " in s:
-        head, _, rhs = s.partition(" -> ")
-        if not rhs.strip():
-            return f"{head} -> ε"
-    if "|" in s:
-        left, _, alt = s.partition("|")
-        if not alt.strip():
-            s = left.rstrip() + " | ε"
+    s = re.sub(r"\beps\b", "ε", s)
     if ", " in s:
         return ", ".join(_disp_sym(part) for part in s.split(", "))
     return s
@@ -209,9 +204,9 @@ CASES: list[dict[str, Any]] = [
         "input": {
             "gramatica": (
                 "E  -> T E'\n"
-                "E' -> + T E' | \n"
+                "E' -> + T E' | ε\n"
                 "T  -> F T'\n"
-                "T' -> * F T' | \n"
+                "T' -> * F T' | ε\n"
                 "F  -> ( E ) | id"
             ),
             "simbolo_inicial": "E",
@@ -231,7 +226,7 @@ CASES: list[dict[str, Any]] = [
         "label": "CASO 4 — Gramatica con epsilon (cadena: 'a b')",
         "gramatica_parseable": True,
         "input": {
-            "gramatica":       "S -> A B\nA -> a | \nB -> b c | b",
+            "gramatica":       "S -> A B\nA -> a | ε\nB -> b c | b",
             "simbolo_inicial": "S",
             "cadena_entrada":  "a b",
         },

@@ -1,7 +1,12 @@
 .gitignore
 
+
 # Backend =============================
 
-
+*/BottomUp/__pycache__
+*/TopDown/__pycache__
 
 # Frontend =============================
+
+
+

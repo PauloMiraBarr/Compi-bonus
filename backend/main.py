@@ -1,0 +1,2 @@
+# esta linea agrega el directorio actual
+sys.path.insert(0, os.path.dirname(__file__))
